@@ -3,13 +3,13 @@ import actix from "../index.js"
 const app = actix();
 
 app.get("/", (req) => {
-  console.log("Index!", req);
+  // console.log("Index!", req);
 });
 app.get("/hello", async (req) => {
-  console.log("Hello World!", req);
+  // console.log("Hello World!", req);
 
   if (req.body) {
-    console.log("HAS BODY: ", await req.json());
+    // console.log("HAS BODY: ", await req.json());
   }
 });
 

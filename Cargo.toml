@@ -7,12 +7,13 @@ version = "0.0.0"
 crate-type = ["cdylib"]
 
 [dependencies]
-actix-web = "4.5.1"
+axum = "0.7.5"
 futures = "0.3.30"
 matchit = "0.8.0"
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4", "tokio_rt"] }
 napi-derive = { version = "2.12.2", default-features = false }
+tower = "0.4.13"
 
 [build-dependencies]
 napi-build = "2.0.1"
