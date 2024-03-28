@@ -1,17 +1,25 @@
 #![deny(clippy::all)]
 
+use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use actix_web::dev::ServiceRequest;
-use actix_web::web::Bytes;
-use actix_web::HttpMessage;
-use actix_web::{dev::ServerHandle, web, App, HttpRequest, HttpResponse, HttpServer};
+use axum::body::Body;
+use axum::extract::Request;
+use axum::http::StatusCode;
+use axum::response::Response;
+use axum::serve::IncomingStream;
+use axum::ServiceExt;
+use futures::Future;
 use matchit::{MatchError, Router};
+use napi::tokio::net::TcpListener;
 use napi::{
   bindgen_prelude::*,
   threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction},
   JsFunction, JsObject,
 };
+use tower::{service_fn, Service};
 
 #[macro_use]
 extern crate napi_derive;
@@ -29,9 +37,9 @@ pub struct ActixApp {
   pub hostname: Option<String>,
   pub port: Option<u16>,
 
-  router: Router<ThreadsafeFunction<(HttpRequest, Bytes), ErrorStrategy::Fatal>>,
+  router: Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>,
 
-  server_handler: Option<ServerHandle>,
+  server_handler: Option<()>,
 }
 
 #[napi]
@@ -70,43 +78,72 @@ impl ActixApp {
 
     let router = Arc::new(self.router.clone());
 
-    let server = HttpServer::new(move || {
-      let router = Arc::clone(&router);
-
-      App::new().default_service(web::to(move |req: HttpRequest, body: Bytes| {
-        let router = Arc::clone(&router);
-
-        async move {
-          let val = router.at(req.path());
-
-          match val {
-            Ok(callback) => {
-              let callback = callback.value;
-              callback.call(
-                (req, body).clone(),
-                napi::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
-              );
-              HttpResponse::Found()
-            }
-            Err(MatchError::NotFound) => HttpResponse::NotFound(),
-          }
-        }
-      }))
-    })
-    .bind((hostname, port))?
-    .run();
-
     if let Some(callback) = callback {
       callback.call1::<ActixApp, ()>(self.clone())?;
     }
 
-    let server_handler = server.handle();
-    self.server_handler = Some(server_handler);
-
     env.execute_tokio_future(
-      async {
-        server.await?;
-        // thread::sleep(Duration::MAX);
+      async move {
+        let router = Arc::clone(&router);
+        let tcp_listener = TcpListener::bind((hostname, port)).await?;
+
+
+        #[derive(Clone)]
+        struct ServiceFn<F>(
+          Arc<Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>>,
+          F,
+        );
+
+        impl<T, F, Request, R, E> Service<Request> for ServiceFn<T>
+        where
+          T: FnMut(Arc<Router<ThreadsafeFunction<axum::extract::Request, ErrorStrategy::Fatal>>>, Request) -> F,
+          F: Future<Output = std::result::Result<R, E>>,
+        {
+          type Response = R;
+          type Error = E;
+          type Future = F;
+
+          fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<std::result::Result<(), E>> {
+            Ok(()).into()
+          }
+
+          fn call(&mut self, req: Request) -> Self::Future {
+            (self.1)(self.0.clone(), req)
+          }
+        }
+
+        let handler = ServiceFn(router, |router: Arc<Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>>, req: Request| async move {
+            let val = router.clone();
+                    let val = val .at(req.uri().path());
+
+            match val {
+              Ok(callback) => {
+                let callback = callback.value;
+                callback.call(
+                  req,
+                  napi::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
+                );
+                Ok::<_, Infallible>(
+                  Response::builder()
+                    .status(StatusCode::FOUND)
+                    .body(Body::empty())
+                    .unwrap(),
+                )
+              },
+              Err(MatchError::NotFound) => {
+                Ok(
+                  Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::empty())
+                    .unwrap(),
+                )
+              },
+            }
+
+                });
+
+        axum::serve(tcp_listener, handler.into_make_service()).await?;
+
         Ok(())
       },
       |&mut env, _| env.get_undefined(),
@@ -114,20 +151,21 @@ impl ActixApp {
   }
 }
 
-fn req_to_jsreq(ctx: ThreadSafeCallContext<(HttpRequest, Bytes)>) -> Result<JsObject> {
-  let req = ctx.value.0.clone();
-  let href = {
-    let href = req.connection_info().clone();
-    let scheme = href.scheme();
-    let host = href.host();
-    let pathname = req.path();
-
-    format!("{scheme}://{host}{pathname}")
-  };
+fn req_to_jsreq(ctx: ThreadSafeCallContext<Request>) -> Result<JsObject> {
+  let req = ctx.value;
+  let href = String::from("http://localhost:3000/fake");
+  // let href = {
+  //   let href = req.connection_info().clone();
+  //   let scheme = href.scheme();
+  //   let host = href.host();
+  //   let pathname = req.path();
+  //
+  //   format!("{scheme}://{host}{pathname}")
+  // };
   let method = req.method().as_str().to_owned();
   let headers = req.headers().clone();
 
-  let body = ctx.value.1;
+  let body = req.body();
 
   let jsreq = ctx.env.create_string("Request")?;
   let jsreq = ctx.env.get_global()?.get_property::<_, JsFunction>(jsreq)?;
@@ -141,6 +179,8 @@ fn req_to_jsreq(ctx: ThreadSafeCallContext<(HttpRequest, Bytes)>) -> Result<JsOb
   let mut js_headers = ctx.env.create_object()?;
 
   for (name, value) in headers {
+    assert!(name.is_some());
+    let name = name.unwrap();
     let name = name.as_str();
     let value = value
       .to_str()
@@ -151,10 +191,10 @@ fn req_to_jsreq(ctx: ThreadSafeCallContext<(HttpRequest, Bytes)>) -> Result<JsOb
   }
   options.set_named_property("headers", js_headers)?;
 
-  if !body.is_empty() {
-    let body = ctx.env.create_arraybuffer_with_data(body.to_vec())?;
-    options.set_named_property("body", body.into_unknown())?;
-  }
+  // if !body.into_data_stream().is_empty() {
+  //   let body = ctx.env.create_arraybuffer_with_data(body.to_vec())?;
+  //   options.set_named_property("body", body.into_unknown())?;
+  // }
 
   jsreq.new_instance(&[href.into_unknown(), options.into_unknown()])
 }
