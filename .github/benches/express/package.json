@@ -1,0 +1,15 @@
+{
+  "name": "express_bench",
+  "version": "1.0.0",
+  "description": "bench test",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "RustLangES",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
