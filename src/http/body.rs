@@ -1,5 +1,3 @@
-use super::executor;
-
 use core::fmt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -132,7 +130,7 @@ impl Iterator for Body {
   type Item = io::Result<Bytes>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    executor::Parker::new()
+    tokio::runtime::Handle::current()
       .block_on(self.0.data())
       .map(|res| res.map_err(|err| io::Error::new(io::ErrorKind::Other, err)))
   }

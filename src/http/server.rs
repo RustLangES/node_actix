@@ -1,5 +1,6 @@
-use super::{executor, Body, Request, Response};
+use super::{Body, Request, Response};
 
+use hyper::server::conn::Http;
 use std::{
   convert::Infallible,
   future::Future,
@@ -7,18 +8,8 @@ use std::{
   net::{SocketAddr, ToSocketAddrs},
   pin::Pin,
   sync::Arc,
-  time::Duration,
 };
-
-use hyper::rt::Executor;
-use hyper::server::conn::Http;
 use tokio::net::TcpListener;
-
-const DATA: &[u8] = b"HTTP/1.1 200 Ok
-Content-Length: 12
-Content-Type: text/plain; charset=utf-8
-\n
-Hello World";
 
 /// An HTTP server.
 ///
@@ -44,8 +35,6 @@ pub struct Server {
   http1_title_case_headers: Option<bool>,
   http1_preserve_header_case: Option<bool>,
   http1_only: Option<bool>,
-  worker_keep_alive: Option<Duration>,
-  max_workers: Option<usize>,
 }
 
 /// HTTP connection information.
@@ -156,11 +145,9 @@ impl Server {
     Server {
       addr,
       http1_only: None,
-      max_workers: None,
       http1_writev: None,
       http1_keep_alive: None,
       http1_half_close: None,
-      worker_keep_alive: None,
       http1_max_buf_size: None,
       http1_pipeline_flush: None,
       http1_title_case_headers: None,

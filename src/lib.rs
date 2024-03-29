@@ -2,12 +2,11 @@
 
 pub mod http;
 
-use std::convert::Infallible;
 use std::sync::{Arc, RwLock};
 
 // use astra as http;
 use futures::Future;
-use http::{Body, ConnectionInfo, Request, Response, ResponseBuilder, Server};
+use http::{Body, ConnectionInfo, Request, ResponseBuilder, Server};
 use hyper::service::Service;
 use hyper::StatusCode;
 use matchit::{MatchError, Router};
@@ -29,7 +28,7 @@ pub fn actix() -> ActixApp {
 }
 
 type MyRequest = Request;
-type RouterNode = ThreadsafeFunction<Arc<MyRequest>, ErrorStrategy::Fatal>;
+type RouterNode = ThreadsafeFunction<MyRequest, ErrorStrategy::Fatal>;
 
 #[derive(Clone, Default)]
 #[napi]
@@ -94,7 +93,7 @@ impl ActixApp {
             Ok(callback) => {
               let callback = callback.value;
               callback.call_with_return_value::<u16, _>(
-                Arc::new(req),
+                req,
                 ThreadsafeFunctionCallMode::NonBlocking,
                 |data| {
                   println!("{data}");
@@ -127,7 +126,7 @@ impl ActixApp {
   }
 }
 
-fn req_to_jsreq(ctx: ThreadSafeCallContext<Arc<MyRequest>>) -> Result<JsObject> {
+fn req_to_jsreq(ctx: ThreadSafeCallContext<MyRequest>) -> Result<JsObject> {
   let req = ctx.value;
   let href = String::from("http://localhost:3000/fake");
   // let href = {
@@ -171,6 +170,7 @@ fn req_to_jsreq(ctx: ThreadSafeCallContext<Arc<MyRequest>>) -> Result<JsObject> 
   //   let body = ctx.env.create_arraybuffer_with_data(body.to_vec())?;
   //   options.set_named_property("body", body.into_unknown())?;
   // }
+  //
 
   jsreq.new_instance(&[href.into_unknown(), options.into_unknown()])
 }
