@@ -1,25 +1,22 @@
 #![deny(clippy::all)]
 
-use std::convert::Infallible;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+pub mod http;
 
-use axum::body::Body;
-use axum::extract::Request;
-use axum::http::StatusCode;
-use axum::response::Response;
-use axum::serve::IncomingStream;
-use axum::ServiceExt;
+use std::convert::Infallible;
+use std::sync::{Arc, RwLock};
+
+// use astra as http;
 use futures::Future;
+use http::{Body, ConnectionInfo, Request, Response, ResponseBuilder, Server};
+use hyper::service::Service;
+use hyper::StatusCode;
 use matchit::{MatchError, Router};
-use napi::tokio::net::TcpListener;
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi::{
   bindgen_prelude::*,
   threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction},
   JsFunction, JsObject,
 };
-use tower::{service_fn, Service};
 
 #[macro_use]
 extern crate napi_derive;
@@ -31,15 +28,16 @@ pub fn actix() -> ActixApp {
   }
 }
 
+type MyRequest = Request;
+type RouterNode = ThreadsafeFunction<Arc<MyRequest>, ErrorStrategy::Fatal>;
+
 #[derive(Clone, Default)]
 #[napi]
 pub struct ActixApp {
   pub hostname: Option<String>,
   pub port: Option<u16>,
 
-  router: Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>,
-
-  server_handler: Option<()>,
+  router: Router<RouterNode>,
 }
 
 #[napi]
@@ -83,66 +81,44 @@ impl ActixApp {
     }
 
     env.execute_tokio_future(
+      #[allow(unreachable_code)]
       async move {
         let router = Arc::clone(&router);
-        let tcp_listener = TcpListener::bind((hostname, port)).await?;
+        // let tcp_listener = TcpListener::bind((hostname, port)).await?;
 
+        let handler = move |router: Arc<Router<RouterNode>>, req: MyRequest| {
+          let val = Arc::clone(&router);
+          let val = val.at(req.uri().path());
 
-        #[derive(Clone)]
-        struct ServiceFn<F>(
-          Arc<Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>>,
-          F,
-        );
+          match val {
+            Ok(callback) => {
+              let callback = callback.value;
+              callback.call_with_return_value::<u16, _>(
+                Arc::new(req),
+                ThreadsafeFunctionCallMode::NonBlocking,
+                |data| {
+                  println!("{data}");
+                  Ok(())
+                },
+              );
 
-        impl<T, F, Request, R, E> Service<Request> for ServiceFn<T>
-        where
-          T: FnMut(Arc<Router<ThreadsafeFunction<axum::extract::Request, ErrorStrategy::Fatal>>>, Request) -> F,
-          F: Future<Output = std::result::Result<R, E>>,
-        {
-          type Response = R;
-          type Error = E;
-          type Future = F;
-
-          fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<std::result::Result<(), E>> {
-            Ok(()).into()
-          }
-
-          fn call(&mut self, req: Request) -> Self::Future {
-            (self.1)(self.0.clone(), req)
-          }
-        }
-
-        let handler = ServiceFn(router, |router: Arc<Router<ThreadsafeFunction<Request, ErrorStrategy::Fatal>>>, req: Request| async move {
-            let val = router.clone();
-                    let val = val .at(req.uri().path());
-
-            match val {
-              Ok(callback) => {
-                let callback = callback.value;
-                callback.call(
-                  req,
-                  napi::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
-                );
-                Ok::<_, Infallible>(
-                  Response::builder()
-                    .status(StatusCode::FOUND)
-                    .body(Body::empty())
-                    .unwrap(),
-                )
-              },
-              Err(MatchError::NotFound) => {
-                Ok(
-                  Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::empty())
-                    .unwrap(),
-                )
-              },
+              ResponseBuilder::new()
+                .status(StatusCode::FOUND)
+                .body(Body::empty())
+                .unwrap()
             }
+            Err(MatchError::NotFound) => ResponseBuilder::new()
+              .status(StatusCode::NOT_FOUND)
+              .body(Body::empty())
+              .unwrap(),
+          }
+        };
 
-                });
-
-        axum::serve(tcp_listener, handler.into_make_service()).await?;
+        Server::bind((hostname, port))
+          .await
+          .serve(move |req: Request, _: ConnectionInfo| handler.clone()(router.clone(), req))
+          .await
+          .unwrap();
 
         Ok(())
       },
@@ -151,7 +127,7 @@ impl ActixApp {
   }
 }
 
-fn req_to_jsreq(ctx: ThreadSafeCallContext<Request>) -> Result<JsObject> {
+fn req_to_jsreq(ctx: ThreadSafeCallContext<Arc<MyRequest>>) -> Result<JsObject> {
   let req = ctx.value;
   let href = String::from("http://localhost:3000/fake");
   // let href = {
@@ -165,10 +141,10 @@ fn req_to_jsreq(ctx: ThreadSafeCallContext<Request>) -> Result<JsObject> {
   let method = req.method().as_str().to_owned();
   let headers = req.headers().clone();
 
-  let body = req.body();
-
-  let jsreq = ctx.env.create_string("Request")?;
-  let jsreq = ctx.env.get_global()?.get_property::<_, JsFunction>(jsreq)?;
+  let jsreq = ctx
+    .env
+    .get_global()?
+    .get_named_property::<JsFunction>("Request")?;
 
   let href = ctx.env.create_string(&href)?;
   let mut options = ctx.env.create_object()?;
@@ -197,4 +173,29 @@ fn req_to_jsreq(ctx: ThreadSafeCallContext<Request>) -> Result<JsObject> {
   // }
 
   jsreq.new_instance(&[href.into_unknown(), options.into_unknown()])
+}
+
+#[derive(Clone)]
+struct ServiceFn<T>(Arc<Router<RouterNode>>, Arc<RwLock<T>>);
+
+impl<T, F, Request, R, E> Service<Request> for ServiceFn<T>
+where
+  T: FnMut(Arc<Router<RouterNode>>, Request) -> F,
+  F: Future<Output = std::result::Result<R, E>>,
+{
+  type Response = R;
+  type Error = E;
+  type Future = F;
+
+  fn poll_ready(
+    &mut self,
+    _: &mut std::task::Context<'_>,
+  ) -> std::task::Poll<std::prelude::v1::Result<(), Self::Error>> {
+    std::task::Poll::Ready(Ok(()))
+  }
+
+  fn call(&mut self, req: Request) -> Self::Future {
+    let mut handler = self.1.write().unwrap();
+    handler(self.0.clone(), req)
+  }
 }

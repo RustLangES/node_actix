@@ -7,13 +7,15 @@ version = "0.0.0"
 crate-type = ["cdylib"]
 
 [dependencies]
-axum = "0.7.5"
+astra = "0.3.0"
 futures = "0.3.30"
+futures-core = "0.3.30"
+hyper = { version = "0.14", features = ["http1", "server", "stream"] }
 matchit = "0.8.0"
-# Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4", "tokio_rt"] }
 napi-derive = { version = "2.12.2", default-features = false }
-tower = "0.4.13"
+num_cpus = "1.16.0"
+tokio = { version = "1.37.0", features = ["full", "tracing"] }
 
 [build-dependencies]
 napi-build = "2.0.1"
