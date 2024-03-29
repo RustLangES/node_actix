@@ -13,6 +13,7 @@ use std::{
 use hyper::rt::Executor;
 use hyper::server::conn::Http;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 const DATA: &[u8] = b"HTTP/1.1 200 Ok
 Content-Length: 12
@@ -194,8 +195,8 @@ impl Server {
     S: Service + Clone,
   {
     // let executor = executor::Executor::new(self.max_workers, self.worker_keep_alive);
-    let mut http = Http::new();
-    self.configure(&mut http);
+    let http = Arc::new(Mutex::new(Http::new()));
+    // self.configure(http.lock().await);
 
     // let reactor = Reactor::new().expect("failed to create reactor");
 
@@ -212,7 +213,7 @@ impl Server {
       };
 
       tokio::task::spawn(async move {
-        if let Err(err) = http
+        if let Err(err) = http.lock().await
           .serve_connection(conn, service::HyperService(service, info))
           .await
         {
