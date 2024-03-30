@@ -1,0 +1,92 @@
+name: Bench frameworks
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - labeled
+    branches:
+      - main
+    paths:
+      - ".github/workflows/benches/**/index.js"
+      - ".github/workflows/benches/**/package.json"
+      - "src/**/**.rs"
+      - "Cargo.toml"
+      - "package.json"
+
+jobs:
+  check_running:
+    runs-on: ubuntu-22.04
+    if: contains(github.event.pull_request.labels.*.name, 'need-bench') || ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Pass
+        run: |
+          echo "Running Benches"
+
+  bench_express:
+    runs-on: ubuntu-22.04
+    needs: [check_running]
+    env:
+      CURRENT_BENCH: express
+      SAVE: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install NodeJs Deps
+        run: |
+          cd .github/workflows/benches/$CURRENT_BENCH
+          npm i
+      - name: Run server
+        run: |
+          cd .github/workflows/benches/$CURRENT_BENCH
+          npm run start &
+      - name: Wait server
+        run: |
+          sleep 2s
+      - name: Run Bench
+        run: |
+          cd .github/workflows/benches
+          node index.js $SAVE
+      - name: Commit Cache
+        if: ${{ env.SAVE }}
+        run: |
+          git add -A
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git config --global --add safe.directory /github/workspace
+          git commit -m 'chore: update benchmark cache' 
+          git push origin main
+
+  bench_fastify:
+    runs-on: ubuntu-22.04
+    needs: [check_running]
+    env:
+      CURRENT_BENCH: fastify
+      SAVE: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install NodeJs Deps
+        run: |
+          cd .github/workflows/benches/$CURRENT_BENCH
+          npm i
+      - name: Run server
+        run: |
+          cd .github/workflows/benches/$CURRENT_BENCH
+          npm run start &
+      - name: Wait server
+        run: |
+          sleep 2s
+      - name: Run Bench
+        run: |
+          cd .github/workflows/benches
+          node index.js $SAVE
+
+          # bench_self:
+          #   runs-on: ubuntu-22.04
+          #   needs: [check_running]
+          #   env:
+          #     CURRENT_BENCH: self
+          #     SAVE: ${{ github.event_name == 'workflow_dispatch' }}
+          #   steps:
+          #     - name: Checkout
+          #       uses: actions/checkout@v3
