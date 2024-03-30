@@ -10,7 +10,6 @@ use http::{Body, ConnectionInfo, Request, ResponseBuilder, Server};
 use hyper::service::Service;
 use hyper::StatusCode;
 use matchit::{MatchError, Router};
-use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi::{
   bindgen_prelude::*,
   threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction},
@@ -43,8 +42,13 @@ pub struct ActixApp {
 impl ActixApp {
   #[napi]
   pub fn get(&mut self, path: String, callback: JsFunction) -> Result<()> {
-    let callback =
-      callback.create_threadsafe_function(1, |ctx| req_to_jsreq(ctx).map(|v| vec![v]))?;
+    // req_to_jsreq(ctx).map(|v| vec![v])
+    let callback = callback.create_threadsafe_function(0, |ctx| {
+    req_to_jsreq(ctx).map(|v| vec![v])
+      // let obj = ctx.env.create_object()?;
+      // obj.set_named_property("url", ctx.env.create_string("some url")?)?;
+      // Ok(vec![obj])
+    })?;
 
     self
       .router
@@ -91,15 +95,12 @@ impl ActixApp {
 
           match val {
             Ok(callback) => {
-              let callback = callback.value;
-              callback.call_with_return_value::<u16, _>(
-                req,
-                ThreadsafeFunctionCallMode::NonBlocking,
-                |data| {
-                  println!("{data}");
-                  Ok(())
-                },
-              );
+              let callback = callback.value.clone();
+
+              tokio::spawn(async move {
+                let a = callback.call_async::<u16>(req).await.unwrap();
+                println!("Callback resuelto: {a}");
+              });
 
               ResponseBuilder::new()
                 .status(StatusCode::FOUND)

@@ -181,8 +181,8 @@ impl Server {
     S: Service + Clone,
   {
     // let executor = executor::Executor::new(self.max_workers, self.worker_keep_alive);
-    let mut http = Http::new();
-    self.configure(&mut http);
+    let http = Arc::new(Http::new());
+    // self.configure(&mut http);
 
     // let reactor = Reactor::new().expect("failed to create reactor");
 

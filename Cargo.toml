@@ -12,6 +12,7 @@ futures = "0.3.30"
 futures-core = "0.3.30"
 hyper = { version = "0.14", features = ["http1", "server", "stream"] }
 matchit = "0.8.0"
+mimalloc = "0.1.39"
 napi = { version = "2.12.2", default-features = false, features = ["napi4", "tokio_rt"] }
 napi-derive = { version = "2.12.2", default-features = false }
 num_cpus = "1.16.0"

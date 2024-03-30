@@ -2,12 +2,6 @@
   "name": "node-actix",
   "version": "0.0.0",
   "main": "index.js",
-  "types": "index.d.ts",
-  "napi": {
-    "name": "node-actix",
-    "triples": {}
-  },
-  "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0",
     "ava": "^6.0.1"
@@ -18,6 +12,12 @@
   "engines": {
     "node": ">= 10"
   },
+  "license": "MIT",
+  "napi": {
+    "name": "node-actix",
+    "triples": {}
+  },
+  "packageManager": "bun",
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release --js false --dts .d.ts.ignore",
@@ -27,5 +27,5 @@
     "universal": "napi universal",
     "version": "napi version"
   },
-  "packageManager": "bun"
+  "types": "index.d.ts"
 }

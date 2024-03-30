@@ -297,6 +297,6 @@ if (!nativeBinding) {
 
 const { actix, ActixApp } = nativeBinding
 
-module.exports = actix
+module.exports.actix = actix
 module.exports.actix = actix
 module.exports.ActixApp = ActixApp

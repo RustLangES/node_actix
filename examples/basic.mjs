@@ -3,7 +3,7 @@ import actix from "../index.js"
 const app = actix();
 
 app.get("/", (req) => {
-  console.log("Index!", req);
+  console.log("Index!", req.url);
   return 0;
 });
 app.get("/hello", async (req) => {
